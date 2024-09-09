@@ -35,44 +35,18 @@ defmodule SqltoyElixir.Database do
     t1 = from(database, t1)
     t2 = from(database, t2)
 
-    Enum.reduce(t1.rows, Table.new(), fn t1_row, result_table ->
-      Enum.reduce(t2.rows, result_table, fn t2_row, result_table ->
-        row_t1 =
-          t1_row
-          |> Map.keys()
-          |> Enum.map(fn k ->
-            cn = if t1.name, do: "#{t1.name}.#{k}", else: k
-            {cn, t1_row[k]}
-          end)
-          |> Map.new()
+    for t1_row <- t1.rows, t2_row <- t2.rows, into: %Table{} do
+      left = namespaced_row(t1, t1_row)
+      right = namespaced_row(t2, t2_row)
 
-        row_t2 =
-          t2_row
-          |> Map.keys()
-          |> Enum.map(fn k ->
-            cn = if t2.name, do: "#{t2.name}.#{k}", else: k
-            {cn, t2_row[k]}
-          end)
-          |> Map.new()
-
-        row =
-          row_t1
-          |> Map.merge(row_t2)
-          |> Map.put(:_table_rows, [t1_row, t2_row])
-
-        Table.append(result_table, row)
-      end)
-    end)
+      left
+      |> Map.merge(right)
+      |> Map.put(:_table_rows, [t1_row, t2_row])
+    end
   end
 
   def inner_join(db, t1, t2, pred) do
-    rows =
-      db
-      |> cross_join(t1, t2)
-      |> Map.get(:rows)
-      |> Enum.filter(pred)
-
-    Table.new(nil, rows)
+    %Table{rows: Enum.filter(cross_join(db, t1, t2).rows, pred)}
   end
 
   def left_join(db, t1, t2, pred) do
@@ -80,30 +54,20 @@ defmodule SqltoyElixir.Database do
     t2 = from(db, t2)
     cp = cross_join(t1, t2)
 
-    Enum.reduce(t1.rows, Table.new(nil), fn t1_row, result ->
+    for t1_row <- t1.rows, into: %Table{} do
       cp_t1 = Enum.filter(cp.rows, fn %{_table_rows: tr} -> Enum.any?(tr, &(&1 == t1_row)) end)
 
       case Enum.filter(cp_t1, pred) do
         [_ | _] = match ->
-          Table.append(result, match)
+          match
 
         [] ->
-          t1_v =
-            t1_row
-            |> Map.keys()
-            |> Enum.map(&{"#{t1.name}.#{&1}", t1_row[&1]})
-            |> Map.new()
+          left = namespaced_row(t1, t1_row)
+          right = namespaced_row(t2, List.first(t2.rows, %{}), true)
 
-          t2_v =
-            t2.rows
-            |> List.first(%{})
-            |> Map.keys()
-            |> Enum.map(&{"#{t2.name}.#{&1}", nil})
-            |> Map.new()
-
-          Table.append(result, Map.merge(t1_v, t2_v))
+          Map.merge(left, right)
       end
-    end)
+    end
   end
 
   def right_join(db, t1, t2, pred), do: left_join(db, t2, t1, pred)
@@ -149,4 +113,17 @@ defmodule SqltoyElixir.Database do
   end
 
   defp with_db(db, fun), do: fun.(db)
+
+  defp namespaced_row(table, row, nilify? \\ false)
+
+  defp namespaced_row(table, row, true) do
+    for {k, _v} <- row, into: %{}, do: {namespaced_key(table, k), nil}
+  end
+
+  defp namespaced_row(table, row, _) do
+    for {k, v} <- row, into: %{}, do: {namespaced_key(table, k), v}
+  end
+
+  defp namespaced_key(%Table{name: nil}, key), do: key
+  defp namespaced_key(%Table{name: name}, key), do: "#{name}.#{key}"
 end

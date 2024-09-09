@@ -7,7 +7,7 @@ defmodule SqltoyElixir.Table do
 
   alias SqltoyElixir.Table.Render
 
-  defstruct [:name, rows: [], _select: nil]
+  defstruct name: nil, rows: [], _select: nil
 
   def new(name \\ nil, rows \\ []), do: %__MODULE__{name: name, rows: rows}
 
@@ -57,28 +57,30 @@ defmodule SqltoyElixir.Table do
     group_bys = Enum.map(group_bys, &to_string/1)
 
     key_rows =
-      Enum.reduce(table.rows, %{}, fn row, key_rows ->
-        key =
-          group_bys
-          |> Enum.map(&row[&1])
-          |> Enum.join(@us)
+      for row <- table.rows, reduce: %{} do
+        key_rows ->
+          key =
+            group_bys
+            |> Enum.map(&row[&1])
+            |> Enum.join(@us)
 
-        if Map.has_key?(key_rows, key) do
-          Map.put(key_rows, key, key_rows[key] ++ [row])
-        else
-          Map.put(key_rows, key, [row])
-        end
-      end)
+          if Map.has_key?(key_rows, key) do
+            Map.put(key_rows, key, key_rows[key] ++ [row])
+          else
+            Map.put(key_rows, key, [row])
+          end
+      end
 
     result_rows =
-      Enum.reduce(Map.keys(key_rows), [], fn key, result_rows ->
-        result_row =
-          Enum.reduce(group_bys, %{_grouped_values: key_rows[key]}, fn group_by, result_row ->
-            Map.put(result_row, group_by, Enum.at(key_rows[key], 0)[group_by])
-          end)
+      for {_key, [entry | _] = key_row} <- key_rows, reduce: [] do
+        rows ->
+          row =
+            for column <- group_bys, into: %{_grouped_values: key_row} do
+              {column, entry[column]}
+            end
 
-        [result_row | result_rows]
-      end)
+          [row | rows]
+      end
 
     %{table | rows: Enum.reverse(result_rows)}
   end
@@ -89,25 +91,21 @@ defmodule SqltoyElixir.Table do
     columns = Enum.map(columns, &to_string/1)
 
     distinct =
-      table.rows
-      |> Enum.map(fn row ->
+      for row <- table.rows, into: %{} do
         key =
           columns
           |> Enum.map(&row[&1])
           |> Enum.join(@us)
 
         {key, row}
-      end)
-      |> Map.new()
+      end
 
     new_rows =
-      distinct
-      |> Map.keys()
-      |> Enum.map(fn key ->
-        columns
-        |> Enum.map(&{&1, distinct[key][&1]})
-        |> Map.new()
-      end)
+      for {_key, record} <- distinct do
+        for column <- columns, into: %{} do
+          {column, record[column]}
+        end
+      end
 
     %{table | rows: new_rows}
   end
@@ -150,10 +148,10 @@ defmodule SqltoyElixir.Table do
     column = to_string(column)
 
     new_rows =
-      Enum.map(table.rows, fn row ->
+      for row <- table.rows do
         pick = Enum.map(row._grouped_values, & &1[column])
         Map.put(row, "#{name}(#{column})", fun.(pick))
-      end)
+      end
 
     %{table | rows: new_rows}
   end
