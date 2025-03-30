@@ -31,7 +31,7 @@ implementation details).
 
 In general, I _personally_ find that `Enum.reduce/3` is easier to reason about,
 but reviewing the changes in the reduce code suggest that _some_ of the list
-comprehensions are
+comprehensions are more compact and may guide examples.
 
 ## Installation
 
